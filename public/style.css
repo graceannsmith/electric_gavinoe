@@ -1,0 +1,389 @@
+/* public/style.css */
+@import url("./fonts.css");
+
+/* ---------------- Base / reset ---------------- */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+:root{
+  /* Palette */
+  --forest-800: #2f3e2f;
+  --forest-700: #364b37;
+  --forest-500: #506651;
+  --forest-200: #dfe6df;
+
+  --bark-700: #4b3a2f;
+  --bark-500: #6a5242;
+
+  --paper-50: #f7f5f0;
+
+  /* Brand gradient (used on header, titles, whole sidebar) */
+  --brand-grad: linear-gradient(180deg, var(--forest-700), var(--forest-800));
+
+  /* Sidebar sizing */
+  --tabs-w: 50px;
+  --sidebar-content: clamp(340px, 34vw, 560px);
+  --sidebar-w: calc(var(--sidebar-content) + var(--tabs-w));
+
+  /* Spacing */
+  --gap-1: 6px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  color: #1d2939;
+  background: #fff;
+}
+
+a { color: #0b6bcb; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------------- Map & control stacking ---------------- */
+#map { width: 100%; height: 100vh; }
+
+.leaflet-control-container { z-index: 1300 !important; }
+.leaflet-top, .leaflet-bottom { z-index: 1200 !important; }
+
+.leaflet-control-geocoder a,
+.leaflet-control-geocoder button { pointer-events: auto; }
+
+.leaflet-control-geocoder {
+  max-width: min(92vw, 360px);
+  overflow: visible;
+}
+
+/* ---------------- Sidebar shell ---------------- */
+#sidebar.leaflet-sidebar {
+  top: 0;
+  bottom: 0;              /* gives it a finite height */
+    --border-w: 12px;                 /* <— JS reads this too */
+  position: absolute;
+  overflow: visible;                /* allow handle outside the frame */
+  width: min(98vw, calc(var(--sidebar-content) + 2 * var(--border-w))) !important;
+  z-index: 2500; /* above map controls */
+  max-width: 98vw;
+  background: var(--brand-grad);
+  color: #f3f1e7;
+  border: var(--border-w) solid var(--bark-700);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.04),
+    0 14px 30px rgba(0,0,0,.18);
+  --tabs-w: 0px;
+}
+
+/* Hide Leaflet Sidebar tab strip and let content fill the space */
+#sidebar .leaflet-sidebar-tabs { display: none !important; }
+
+#sidebar .leaflet-sidebar-content { 
+
+  position: absolute;     /* restore plugin behavior */
+  top: 0;
+  bottom: 0;              /* fill the sidebar’s height */
+  left: 0 !important;
+  right: 0;
+  width: auto !important; /* avoid double width */
+  overflow: hidden;       /* the pane inside will be the scroller */
+}
+
+
+/* Draggable width handle */
+#sidebar .sidebar-resizer{
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--border-w));   /* sit just outside the border */
+  width: 16px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 2600;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  background: linear-gradient(90deg, transparent, rgba(0,0,0,.18), transparent);
+  opacity: .35;
+}
+#sidebar .sidebar-resizer:hover { opacity: .65; }
+
+#sidebar .sidebar-resizer::after{
+  content:"";
+  position:absolute; inset:0;
+  opacity:.15;
+  background: linear-gradient(90deg, transparent, #000, transparent);
+}
+#sidebar.is-resizing .sidebar-resizer{ cursor: ew-resize; }
+
+/* ---------------- Header ---------------- */
+.leaflet-sidebar-header {
+  font-family: "Bahianita", sans-serif;
+  font-size: 2rem;
+  line-height: 1.2;
+  background: var(--brand-grad);
+  color: #f3f1e7;
+
+  /* keep compact and flush */
+  border: 0;
+  padding: 8px;
+  margin: 0;
+
+  position: sticky;
+  top: 0;
+  z-index: 1;
+
+  /* remove inner frame here to avoid double border look */
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ---------------- Pane & content ---------------- */
+.leaflet-sidebar-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  height: 100%;
+  padding: 8px;
+  overflow: auto;              /* contain inner scroller */
+  background: transparent;       /* let the gradient show through */
+  container-type: inline-size;   /* container queries for inner UI */
+}
+
+/* Scrolling inner content area */
+#pane-details-content p {
+  color: var(--bark-700);
+}
+#pane-details-content {
+  
+  font-family: "Buda", serif;
+  font-weight: 400;
+  font-style: normal;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gap-1);
+  overflow: visible;
+  padding-right: 2px;            /* breathing room by scrollbar */
+  min-height: auto;
+  color: #f3f1e7;                /* readable on the dark gradient */
+}
+
+#pane-details-content > * { margin: 0; }
+#pane-details-content > * + * { margin-top: var(--gap-1); }
+
+/* Ensure readability for light cards on dark bg */
+#pane-details-content ul#tip-inline-list li { color:#1d2939; }
+
+/* Robust wrapping everywhere inside the pane */
+#pane-details-content,
+#marker-info,
+#api-result-list,
+.tip-item,
+.leaflet-sidebar-header {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+#pane-details-content h2 {
+  color: var(--bark-700);
+}
+
+#pane-details-content img { max-width: 100%; height: auto; }
+
+/* ---------------- Titles (all <h1>) ---------------- */
+#pane-details-content h1,
+.details-header h1,
+.section-title{
+  font-family: "Bahianita", sans-serif;
+  font-weight: 400;
+  letter-spacing: .3px;
+  color: #f3f1e7;
+  margin: 0;                     /* “flush under” the main title */
+  padding: 6px 8px;
+  background: var(--brand-grad); /* same gradient as Electric Gavinoe */
+  border-radius: 8px;
+  /* Bark frame around titles */
+  box-shadow: inset 0 0 0 4px var(--bark-700);
+}
+/* Make API cards readable inside the dark pane */
+#pane-details-content .api-card {
+  color: #111 !important;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+
+#pane-details-content .api-card a {
+  color: #0b6bcb !important;
+}
+
+/* Divider above Perceptacle */
+#pane-details-content hr{
+  border: 0;
+  border-top: 6px solid var(--bark-700);
+  border-radius: 6px;
+  margin: 10px 0 8px;
+}
+.leaflet-sidebar-pane,
+#pane-details-content,
+#api-explore,
+#api-result-list,
+#tip-inline-list { min-width: 0; }
+/* ---------------- Details header meta (pill + hover controls) ---------------- */
+.details-header{
+  display:flex; 
+  align-items:center; 
+  justify-content:space-between; 
+  gap:.5rem;
+  margin-top: 6px; /* sits right under the marker title */
+  flex-wrap: wrap;
+}
+.hover-controls{ display:flex; gap:.25rem; opacity:0; transition:opacity .15s; }
+.details-header:hover .hover-controls{ opacity:1; }
+.hover-btn{ border:0; background:transparent; cursor:pointer; font-size:1rem; line-height:1; padding:.25rem; border-radius:.5rem; }
+.hover-btn:focus{ outline:2px solid rgb(183, 169, 20); outline-offset:2px; }
+
+.readonly-pill{
+  display:inline-block;
+  font-size:.8rem;
+  padding:.2rem .55rem;
+  border-radius:999px;
+  color:#f3f1e7;
+  background: linear-gradient(180deg, #617a62, #3e5140);
+  border: 2px solid var(--bark-700);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+}
+
+/* ---------------- Buttons / inputs around Perceptacle ---------------- */
+#tip-inline-text,
+#btn-inat,
+#btn-wiki-historic,
+#tip-toolbar select#tip-sort,
+#tip-preview-btn,
+#tip-attach-btn {
+  border: 4px solid var(--bark-700);
+  border-radius: 10px;
+  background: #fffdf8;          /* paper-ish interior */
+  padding: 8px;
+  color: #1f2a1f;
+}
+
+#btn-inat, #btn-wiki-historic { padding: 6px 10px; }
+
+#tip-toolbar { display:flex; justify-content:flex-end; gap:6px; align-items:center; margin:4px 0; }
+#tip-toolbar label{ font-size:.9em; color:#e7ece7; } /* light on dark bg */
+#tip-toolbar select#tip-sort{ padding:6px 10px; appearance: none; }
+
+#tip-preview-btn {
+  background: linear-gradient(180deg, #637e64, #3d5140);
+  color: #f3f1e7;
+}
+#tip-preview-btn:hover { filter: brightness(1.06); }
+
+#tip-inline-text:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(75,58,47,.25);
+}
+#tip-inline-text::placeholder { font-family: "Buda", serif; opacity: .7; }
+
+/* “what is this?” link (3 words footer) */
+#w3w-footer a{
+  color: var(--bark-700);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#w3w-footer strong { color:#f3f1e7; }
+
+#tip-inline-form {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas: "text attach preview";
+  gap: 6px;
+  align-items: start;
+}
+#tip-inline-text   { grid-area: text; }
+#tip-attach-btn    { grid-area: attach; }
+#tip-preview-btn   { grid-area: preview; }
+
+/* When the pane is narrow, stack the controls */
+@container (max-width: 520px) {
+  #tip-inline-form {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "text"
+      "attach"
+      "preview";
+  }
+  #tip-attach-btn,
+  #tip-preview-btn { width: 100%; }
+}
+
+/* API explore buttons wrap cleanly on narrow widths */
+#api-explore > div { flex-wrap: wrap; }
+
+/* Tip text & image spacing/wrapping */
+.tip-text { white-space: pre-wrap; margin-bottom: 4px; }
+.tip-item .tip-photo { display:block; margin-top: 4px; max-width:100%; height:auto; }
+/* ---------------- Tip list ---------------- */
+ul#tip-inline-list{
+  list-style: none;
+  padding: 0;
+  display: flex; flex-direction: column; gap: var(--gap-1);
+  max-height: none;
+  overflow: visible;
+  background: transparent;
+}
+ul#tip-inline-list li{
+  background: #f6f6f6;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  position: relative;
+  border: 1px solid rgba(0,0,0,.06);
+}
+.tip-item .timestamp { font-size: .75em; color: #667085; display:block; margin-top:2px; }
+.tip-item .tip-photo{ display:block; max-width:100%; height:auto; margin-top:6px; border-radius:8px; object-fit:cover; }
+.tip-actions{ margin-top:6px; display:flex; gap:6px; }
+.tip-actions button{ padding:4px 8px; border-radius:4px; border:0; cursor:pointer; }
+.tip-item .pill{ font-size:.75em; padding:.1rem .4rem; border-radius:999px; background:#eef2ff; color:#1e3a8a; margin-left:.5rem; }
+.tip-item.draft{ background:rgba(255,255,255,.8); border:1px dashed rgba(0,0,0,.2); }
+
+.tip-item .delete-tip, .tip-item .edit-tip,
+.marker-item .delete-marker, .marker-item .edit-marker { display:none; margin-left:8px; }
+.tip-item:hover .delete-tip, .tip-item:hover .edit-tip,
+.marker-item:hover .delete-marker, .marker-item:hover .edit-marker { display:inline; }
+
+/* ---------------- Marker edit form ---------------- */
+.marker-edit-form { display:grid; gap:.5rem; margin:.5rem 0; }
+.marker-edit-form input, .marker-edit-form textarea { width:100%; }
+.marker-edit-actions { display:flex; gap:.5rem; }
+
+/* ---------------- Custom marker category icons ---------------- */
+.mk { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+      background:#fff; border:2px solid #777; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+.mk__glyph { font-size:16px; line-height:1; }
+.mk--plant   { border-color:#2e7d32; }
+.mk--history { border-color:#6d4c41; }
+.mk--misc    { border-color:#d219b0; }
+
+/* ---------------- Popup create form ---------------- */
+.mk-form{min-width:260px; display:grid; gap:.5rem;}
+.mk-form .row{display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;}
+.mk-form textarea{width:100%; min-height:70px; resize:vertical;}
+.mk-form .actions{display:flex; gap:.5rem; justify-content:flex-end;}
+
+
+
+/* ---------------- Responsive ---------------- */
+@media (max-width:800px){
+  #sidebar.leaflet-sidebar{
+    width: min(100vw, calc(var(--sidebar-content) + 2 * var(--border-w))) !important;
+    max-width: 100vw;
+  }
+}
+
+/* Keep geocoder above the sidebar even if it overlaps */
+/* .leaflet-top.leaflet-right { z-index: 2001 !important; } */

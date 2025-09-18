@@ -1,0 +1,65 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Preconnect/DNS hints -->
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="dns-prefetch" href="//tile.openstreetmap.org">
+  <link rel="dns-prefetch" href="//waterservices.usgs.gov">
+  <link rel="dns-prefetch" href="//en.wikipedia.org">
+  <link rel="dns-prefetch" href="//upload.wikimedia.org">
+  <link rel="dns-prefetch" href="//api.inaturalist.org">
+  <link rel="dns-prefetch" href="//photon.komoot.io">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-sidebar-v2@3.1.0/css/leaflet-sidebar.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@3.3.0/dist/Control.Geocoder.css" />
+  <!-- Your CSS (versioned) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link rel="stylesheet" href="style.css?v=2025-09-10a" />
+
+  <title>Electric Gavinoe</title>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="sidebar" class="leaflet-sidebar">
+    <div class="leaflet-sidebar-tabs">
+      <ul role="tablist">
+        <li><a href="#details" role="tab"></a></li>
+      </ul>
+    </div>
+    <div class="leaflet-sidebar-content">
+      <div class="leaflet-sidebar-pane" id="details">
+        <h1 class="leaflet-sidebar-header">
+          Electric Gavinoe
+          <span class="leaflet-sidebar-close"><i class="fa fa-chevron-left"></i></span>
+        </h1>
+        <div id="pane-details-content">
+          <h2>📊 Click a blue icon for the latest water level.</h2>
+          <h2>📍 Click anywhere to drop a custom marker.</h2>
+          <h2>💬 After clicking, add or edit tips below.</h2>
+        </div>
+        <div id="details-actions" style="margin:8px; display:none">
+          <button id="edit-current">Edit</button>
+          <button id="delete-current">Delete</button>
+          <button id="delete-marker" style="display:none; margin-left:8px">🗑 Delete Marker</button>
+        </div>
+      </div>
+    </div>
+   </div>
+
+  <!-- Scripts: CDNs first, then your app -->
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://unpkg.com/leaflet-sidebar-v2@3.1.0/js/leaflet-sidebar.min.js"></script>
+  <script defer src="https://unpkg.com/leaflet-control-geocoder@3.3.0/dist/Control.Geocoder.js"></script>
+  <script defer src="main.js?v=2025-09-13a"></script>
+
+</body>
+</html>

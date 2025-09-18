@@ -1,0 +1,22 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+.DS_Store
+
+# Env & local config
+.env
+.env.local
+
+# Runtime data you don't want in git
+public/uploads/
+data/*.json
+
+# Keep the empty folders tracked:
+!public/uploads/.gitkeep
+!data/.gitkeep
+
+# Build artifacts (if you add one later)
+dist/
