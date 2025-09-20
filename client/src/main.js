@@ -1,8 +1,18 @@
-// public/main.js
+// client/src/main.js
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
+import 'leaflet-sidebar-v2';
+import 'leaflet-sidebar-v2/css/leaflet-sidebar.min.css';
+
+import 'leaflet-control-geocoder';
+import 'leaflet-control-geocoder/dist/Control.Geocoder.css';
+import '../style.css';
+import '../fonts.css';
 window.APP_CONFIG = { OPENCAGE_ENABLED: false, NASA_API_KEY: '' };
 fetch('/api/config').then(r => r.json()).then(c => {
   if (c?.opencageEnabled) window.APP_CONFIG.OPENCAGE_ENABLED = true;
+  if (c?.nasaKey) window.APP_CONFIG.NASA_API_KEY = c.nasaKey;
 }).catch(() => {});
 
 console.log('EG main.js v2025-09-13a');
@@ -1110,7 +1120,17 @@ async function loadUSGSGages() {
 // 9) Load custom markers
 async function loadCustomMarkers() {
   customLayer.clearLayers();
-  const markers = await (await fetch('/api/markers')).json();
+
+  let markers = [];
+  try {
+    const r = await fetch('/api/markers', { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    markers = await r.json();
+    if (!Array.isArray(markers)) markers = [];
+  } catch (e) {
+    console.warn('markers fetch failed', e);
+    return; // bail quietly if API is down
+  }
 
   markers.forEach((m, i) => {
     const cat = normalizeCategory(m.category);
@@ -1125,12 +1145,14 @@ async function loadCustomMarkers() {
       .addTo(customLayer)
       .on('click', (e) => {
         L.DomEvent.stopPropagation(e);
-        activeType = 'custom'; activeId = i;
+        activeType = 'custom';
+        activeId = i;
         currentMarkerData = { type: 'custom', index: i, title: m.title, lat: m.lat, lon: m.lon };
         showDetails(infoHtml, [m.lat, m.lon]);
       });
   });
 }
+
 
 // 10) Click to create new custom marker (guided popup)
 map.off('click');

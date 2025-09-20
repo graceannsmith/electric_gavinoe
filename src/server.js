@@ -7,42 +7,18 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import crypto from 'crypto';
 import compression from 'compression';
-import fetch from 'node-fetch';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
-
-globalThis.fetch = fetch; // ensure fetch exists in Node
-
-// --- Resolve __dirname in ES modules ---
+// Node ESM __dirname shim
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-// --- App setup ---
-const app = express();
+// ──────────────────────────────────────────────────────────────────────────────
+// App setup
+// ──────────────────────────────────────────────────────────────────────────────
+const app  = express();
 const port = process.env.PORT || 3000;
-
-// --- Simple in-memory cache for OpenCage ---
-const ocCache = new Map(); // key => { t, body, status, contentType }
-const OC_TTL_MS = 5 * 60 * 1000;   // 5 minutes
-const OC_MAX_ENTRIES = 300;
-
-function ocGet(key) {
-  const row = ocCache.get(key);
-  if (!row) return null;
-  if (Date.now() - row.t > OC_TTL_MS) { ocCache.delete(key); return null; }
-  return row;
-}
-function ocSet(key, val) {
-  if (ocCache.size >= OC_MAX_ENTRIES) {
-    // drop oldest to keep memory bounded
-    let oldestKey, oldestT = Infinity;
-    for (const [k, v] of ocCache) if (v.t < oldestT) { oldestT = v.t; oldestKey = k; }
-    if (oldestKey) ocCache.delete(oldestKey);
-  }
-  ocCache.set(key, { t: Date.now(), ...val });
-}
-
 
 // If behind a proxy (Railway/Render/Heroku), trust it so rate limits/IPs work
 app.set('trust proxy', 1);
@@ -50,37 +26,19 @@ app.set('trust proxy', 1);
 // Hide "X-Powered-By"
 app.disable('x-powered-by');
 
-// --- Security headers (Helmet) ---
-// Content Security Policy tuned to your current client (Leaflet + CDNs + external APIs).
-// Loosened where necessary (e.g., inline scripts for tiny globals, inline styles in your DOM injections).
+// Security headers (CSP tuned for your current client)
 app.use(
   helmet({
-    // Allow cross-origin tiles/images (OSM, Wikipedia, etc.)
     crossOriginResourcePolicy: { policy: 'cross-origin' },
-    // COEP can break third-party map tiles; keep it off
     crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: {
       useDefaults: true,
       directives: {
-        // Block everything by default, then open what you need
         "default-src": ["'self'"],
-        // You use a couple of tiny inline <script> tags in index.html
-        "script-src": [
-          "'self'",
-          "https://unpkg.com"
-        ],
-        // You use inline style attributes and CDN CSS
-        "style-src": [
-          "'self'",
-          "'unsafe-inline'", 
-          "https://unpkg.com", 
-          "https://fonts.googleapis.com"
-        ],
-        // Leaflet pulls images/tiles; NASA/iNat/Wikipedia thumbs; also your uploaded files
+        "script-src": ["'self'", "https://unpkg.com"],
+        "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://fonts.googleapis.com"],
         "img-src": [
-          "'self'",
-          "data:",
-          "blob:",
+          "'self'", "data:", "blob:",
           "https://tile.openstreetmap.org",
           "https://upload.wikimedia.org",
           "https://static.inaturalist.org",
@@ -88,7 +46,6 @@ app.use(
           "https://apod.nasa.gov",
           "https://*"
         ],
-        // Where fetch/XHR/WebSockets are allowed from the browser
         "connect-src": [
           "'self'",
           "https://api.inaturalist.org",
@@ -105,89 +62,113 @@ app.use(
         "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
         "object-src": ["'none'"],
         "base-uri": ["'self'"],
-        "frame-ancestors": ["'self'"],
-        "upgrade-insecure-requests": []
+        "frame-ancestors": ["'self'"]
       }
     }
   })
 );
 
-// --- Rate limiting (light, targeted) ---
+// Compression + JSON body parsing
+app.use(compression());
+app.use(express.json({ limit: '200kb' })); // your payloads are tiny JSON
+
+// ──────────────────────────────────────────────────────────────────────────────
+/** Rate limits */
+// ──────────────────────────────────────────────────────────────────────────────
 const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 120,            // 120 requests/min per IP to API routes
+  windowMs: 60 * 1000,
+  max: 120,
   standardHeaders: true,
   legacyHeaders: false
 });
-
 const uploadLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000, // 10 minutes
-  max: 30,                  // 30 uploads per 10 minutes
+  windowMs: 10 * 60 * 1000,
+  max: 30,
   message: { error: 'Too many uploads, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false
 });
 
-// --- Compression (before static) ---
-app.use(compression());
-
-// --- Body parsing with tight-ish limits ---
-app.use(express.json({ limit: '200kb' })); // your payloads are tiny JSON
-
-// --- Static assets ---
-// 1) Long-cache uploads (filenames are content-addressed-ish via timestamp/uuid)
+// Apply limits to API/proxy routes
 app.use(
-  '/uploads',
-  express.static(path.join(__dirname, '../public/uploads'), {
-    etag: true,
-    immutable: true,
-    maxAge: '30d'
-  })
+  [
+    '/api/tips',
+    '/api/markers',
+    '/api/tip-photos',
+    '/api/wikipedia/nearby',
+    '/api/wiki/nearby',
+    '/api/wikidata/nearby',
+    '/api/wiki/historic',
+    '/api/wikidata/historic',
+    '/api/photon',
+    '/api/census/oneline',
+    '/api/census/address',
+    '/api/opencage',
+    '/api/3wa'
+  ],
+  apiLimiter
 );
 
-// 2) Index (no-store) so HTML changes are always fetched fresh
-app.get('/', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
+// ──────────────────────────────────────────────────────────────────────────────
+/** Static assets (uploads + built client) */
+// ──────────────────────────────────────────────────────────────────────────────
+const PUBLIC_UPLOADS_DIR = path.join(__dirname, '../public/uploads'); // serves /uploads/**
+app.use('/uploads', express.static(PUBLIC_UPLOADS_DIR, {
+  etag: true, immutable: true, maxAge: '30d'
+}));
 
-// 3) Everything else in /public with conservative caching (your current behavior)
-app.use(
-  express.static(path.join(__dirname, '../public'), {
-    etag: true,
-    lastModified: true,
-    maxAge: 0,
-    immutable: false
-  })
-);
+const distDir = path.join(__dirname, '../dist');
+if (fs.existsSync(distDir)) {
+  app.use(express.static(distDir, {
+    etag: true, lastModified: true, immutable: true, maxAge: '1y', index: false
+  }));
+  app.get('/', (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
 
-// --- Simple health check for uptime monitors ---
-app.get('/health', (_req, res) => res.status(200).json({ ok: true }));
+// Health check
+app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// --- Ensure file/dir helpers ---
+// ──────────────────────────────────────────────────────────────────────────────
+/** Small file stores for markers/tips */
+// ──────────────────────────────────────────────────────────────────────────────
 function ensureFile(filePath, initialContent) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, initialContent, 'utf8');
 }
 
-// --- Data stores (Tips & Markers) ---
-const TIPS_FILE = path.join(__dirname, '../data/tips.json');
-ensureFile(TIPS_FILE, JSON.stringify({}));
-function readTips() { return JSON.parse(fs.readFileSync(TIPS_FILE, 'utf8')); }
-function writeTips(data) { fs.writeFileSync(TIPS_FILE, JSON.stringify(data, null, 2), 'utf8'); }
+const DATA_DIR = path.join(__dirname, '../data');
+const MARKERS_FILE = path.join(DATA_DIR, 'markers.json');
+const TIPS_FILE    = path.join(DATA_DIR, 'tips.json');
 
-const MARKERS_FILE = path.join(__dirname, '../data/markers.json');
 ensureFile(MARKERS_FILE, JSON.stringify([]));
-function readMarkers() { return JSON.parse(fs.readFileSync(MARKERS_FILE, 'utf8')); }
-function writeMarkers(data) { fs.writeFileSync(MARKERS_FILE, JSON.stringify(data, null, 2), 'utf8'); }
+ensureFile(TIPS_FILE, JSON.stringify({}));
 
-// --- Uploads setup (multer) ---
-const UPLOAD_DIR = path.join(__dirname, '../public/uploads/tips');
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+function readMarkers() {
+  return JSON.parse(fs.readFileSync(MARKERS_FILE, 'utf8'));
+}
+function writeMarkers(arr) {
+  fs.writeFileSync(MARKERS_FILE, JSON.stringify(arr, null, 2), 'utf8');
+}
+
+function readTips() {
+  return JSON.parse(fs.readFileSync(TIPS_FILE, 'utf8'));
+}
+function writeTips(data) {
+  fs.writeFileSync(TIPS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+/** Multer upload for tip photos */
+// ──────────────────────────────────────────────────────────────────────────────
+const TIP_UPLOAD_DIR = path.join(PUBLIC_UPLOADS_DIR, 'tips');
+fs.mkdirSync(TIP_UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  destination: (_req, _file, cb) => cb(null, TIP_UPLOAD_DIR),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const safeExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif'];
@@ -197,7 +178,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 6 * 1024 * 1024 }, // 6MB
+  limits: { fileSize: 6 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ok = /^image\/(jpeg|png|webp|gif|heic|heif)$/.test(file.mimetype);
     if (!ok) return cb(new Error('Only image files are allowed'));
@@ -205,7 +186,54 @@ const upload = multer({
   }
 });
 
-// --- Tips key helpers & migration ---
+// ──────────────────────────────────────────────────────────────────────────────
+/** Config endpoint (lets client know which optional keys exist) */
+// ──────────────────────────────────────────────────────────────────────────────
+app.get('/api/config', (_req, res) => {
+  res.json({
+    opencageEnabled: Boolean(process.env.OPENCAGE_KEY),
+    nasaKey: process.env.NASA_API_KEY || ''   // dev convenience; omit in prod if you prefer
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+/** Markers API (used by client/src/main.js) */
+// ──────────────────────────────────────────────────────────────────────────────
+app.get('/api/markers', (_req, res) => res.json(readMarkers()));
+
+app.post('/api/markers', (req, res) => {
+  const { lat, lon, title, description, category, userId } = req.body || {};
+  if (lat == null || lon == null || !title) return res.status(400).json({ error: 'Missing fields' });
+  const list = readMarkers();
+  const marker = { lat, lon, title, description, category, userId: userId || null, timestamp: Date.now() };
+  list.push(marker);
+  writeMarkers(list);
+  res.status(201).json(marker);
+});
+
+app.put('/api/markers', (req, res) => {
+  const { index, lat, lon, title, description, category } = req.body || {};
+  if (index == null || !title) return res.status(400).json({ error: 'Missing index/title' });
+  const list = readMarkers();
+  if (!list[index]) return res.status(404).json({ error: 'Not found' });
+  list[index] = { lat, lon, title, description, category, timestamp: Date.now() };
+  writeMarkers(list);
+  res.json(list[index]);
+});
+
+app.delete('/api/markers', (req, res) => {
+  const { index } = req.body || {};
+  if (index == null) return res.status(400).json({ error: 'Missing index' });
+  const list = readMarkers();
+  if (!list[index]) return res.status(404).json({ error: 'Not found' });
+  list.splice(index, 1);
+  writeMarkers(list);
+  res.status(204).end();
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+/** Tips API (Perceptacle) */
+// ──────────────────────────────────────────────────────────────────────────────
 (function migrateTipKeysOnce() {
   try {
     const all = readTips();
@@ -240,27 +268,6 @@ function findTipIndex(arr, { id, index }) {
   return -1;
 }
 
-// --- Apply rate limits to API/proxy routes ---
-app.use(
-  [
-    '/api/tips',
-    '/api/markers',
-    '/api/tip-photos',
-    '/api/wikipedia/nearby',
-    '/api/wiki/nearby',
-    '/api/wikidata/nearby',
-    '/api/wiki/historic',
-    '/api/wikidata/historic',
-    '/api/photon',
-    '/api/census/oneline',
-    '/api/census/address',
-    '/api/opencage',
-    '/api/3wa'
-  ],
-  apiLimiter
-);
-
-// --- Tips API ---
 app.get('/api/tips', (req, res) => {
   const key = tipKeyFrom(req.query);
   if (!key) return res.json([]);
@@ -268,9 +275,7 @@ app.get('/api/tips', (req, res) => {
   const all = readTips();
   const raw = all[key] || [];
   const out = raw.filter(
-    t =>
-      t.status === 'published' ||
-      (viewer && t.userId && t.userId === viewer && t.status === 'draft')
+    t => t.status === 'published' || (viewer && t.userId && t.userId === viewer && t.status === 'draft')
   );
   res.json(out);
 });
@@ -300,7 +305,7 @@ app.put('/api/tips', (req, res) => {
   const key = tipKeyFrom(req.body);
   const { id, index, text } = req.body || {};
   if (!key || (!text && !Object.prototype.hasOwnProperty.call(req.body, 'photoUrl')))
-    return res.status(400).json({ error: 'Missing key and updates' });
+    return res.status(400).json({ error: 'Missing key/updates' });
 
   const all = readTips();
   const arr = all[key] || [];
@@ -347,68 +352,17 @@ app.delete('/api/tips', (req, res) => {
   res.status(204).end();
 });
 
-// --- Markers API ---
-app.get('/api/markers', (_req, res) => res.json(readMarkers()));
-
-app.post('/api/markers', (req, res) => {
-  const { lat, lon, title, description, category } = req.body || {};
-  if (lat == null || lon == null || !title) return res.status(400).end();
-  const list = readMarkers();
-  const marker = { lat, lon, title, description, category, timestamp: Date.now() };
-  list.push(marker);
-  writeMarkers(list);
-  res.status(201).json(marker);
-});
-
-app.put('/api/markers', (req, res) => {
-  const { index, lat, lon, title, description, category } = req.body || {};
-  if (index == null || !title) return res.status(400).end();
-  const list = readMarkers();
-  if (!list[index]) return res.status(404).end();
-  list[index] = { lat, lon, title, description, category, timestamp: Date.now() };
-  writeMarkers(list);
-  res.json(list[index]);
-});
-
-app.delete('/api/markers', (req, res) => {
-  const { index } = req.body || {};
-  if (index == null) return res.status(400).end();
-  const list = readMarkers();
-  if (!list[index]) return res.status(404).end();
-  list.splice(index, 1);
-  writeMarkers(list);
-  res.status(204).end();
-});
-
-// --- what3words proxy ---
-app.get('/api/3wa', async (req, res) => {
-  try {
-    const { lat, lon } = req.query;
-    const key = process.env.W3W_API_KEY?.trim();
-    if (!lat || !lon) return res.status(400).json({ error: 'Missing lat/lon' });
-    if (!key) return res.status(500).json({ error: 'Missing W3W_API_KEY' });
-
-    const url = new URL('https://api.what3words.com/v3/convert-to-3wa');
-    url.searchParams.set('coordinates', `${lat},${lon}`);
-    url.searchParams.set('key', key);
-    url.searchParams.set('language', 'en');
-
-    const r = await fetch(url);
-    const body = await r.json().catch(() => ({}));
-    if (r.ok && body?.words) return res.status(200).json({ words: body.words });
-    res.status(r.status).json(body);
-  } catch (_e) {
-    res.status(500).json({ error: 'server error' });
-  }
-});
-
-// --- Photo upload endpoint (limited) ---
+// Photo upload for tips
 app.post('/api/tip-photos', uploadLimiter, upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ url: `/uploads/tips/${req.file.filename}` });
 });
 
-// >>> Wikipedia Nearby proxy (with back-compat)
+// ──────────────────────────────────────────────────────────────────────────────
+/** Proxies your client uses */
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Wikipedia Nearby (with simple cache)
 const wikiCache = new Map();
 const WIKI_TTL_MS = 10 * 60 * 1000;
 
@@ -418,7 +372,6 @@ async function wikipediaNearbyHandler(req, res) {
     const lon = Number(req.query.lon);
     let km = Math.min(Math.max(Number(req.query.km) || 8, 1), 100);
     let limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 50);
-
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
@@ -428,8 +381,7 @@ async function wikipediaNearbyHandler(req, res) {
     if (hit && Date.now() - hit.t < WIKI_TTL_MS) return res.json(hit.data);
 
     const u = new URL('https://en.wikipedia.org/w/api.php');
-    const MAX_RADIUS_M = 10000; // MediaWiki cap
-    const radiusM = Math.min(Math.round(km * 1000), MAX_RADIUS_M);
+    const radiusM = Math.min(Math.round(km * 1000), 10000);
 
     u.searchParams.set('format', 'json');
     u.searchParams.set('action', 'query');
@@ -450,9 +402,7 @@ async function wikipediaNearbyHandler(req, res) {
     const r = await fetch(u, { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
     const j = await r.json();
 
-    if (j?.error) {
-      return res.status(502).json({ error: 'Wikipedia error', detail: j.error.info || j.error.code });
-    }
+    if (j?.error) return res.status(502).json({ error: 'Wikipedia error', detail: j.error.info || j.error.code });
 
     const haversineKm = (aLat, aLon, bLat, bLon) => {
       const toRad = d => (d * Math.PI) / 180;
@@ -487,32 +437,22 @@ async function wikipediaNearbyHandler(req, res) {
       .sort((a, b) => (a.distKm ?? 1e9) - (b.distKm ?? 1e9))
       .slice(0, limit);
 
-    console.log('[wiki] rows=', rows.length, 'for', lat, lon, 'km=req', km, 'km=used', Math.min(km, 10));
     wikiCache.set(key, { t: Date.now(), data: rows });
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: 'server error', detail: String(e?.message || e) });
   }
 }
-
 app.get('/api/wikipedia/nearby', wikipediaNearbyHandler);
-// Back-compat aliases for older clients:
-app.get(
-  ['/api/wiki/nearby', '/api/wikidata/nearby', '/api/wiki/historic', '/api/wikidata/historic'],
-  wikipediaNearbyHandler
-);
+app.get(['/api/wiki/nearby', '/api/wikidata/nearby', '/api/wiki/historic', '/api/wikidata/historic'], wikipediaNearbyHandler);
 
-// --- Photon proxy (avoids CORS; keeps your origin) ---
+// Photon proxy
 app.get('/api/photon', async (req, res) => {
   try {
     const upstream = new URL('https://photon.komoot.io/api/');
     for (const [k, v] of Object.entries(req.query)) upstream.searchParams.set(k, String(v));
-
-    const r = await fetch(upstream.toString(), {
-      headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' }
-    });
+    const r = await fetch(upstream.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
     const body = await r.text();
-
     res.set('Content-Type', r.headers.get('content-type') || 'application/json; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
     res.status(r.status).send(body);
@@ -521,14 +461,13 @@ app.get('/api/photon', async (req, res) => {
   }
 });
 
-// --- US Census proxies (avoid CORS) ---
+// US Census proxies
 app.get('/api/census/oneline', async (req, res) => {
   try {
     const u = new URL('https://geocoding.geo.census.gov/geocoder/locations/onelineaddress');
     u.searchParams.set('address', String(req.query.address || ''));
     u.searchParams.set('benchmark', String(req.query.benchmark || 'Public_AR_Current'));
     u.searchParams.set('format', 'json');
-
     const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
     const body = await r.text();
     res.set('Content-Type', r.headers.get('content-type') || 'application/json; charset=utf-8');
@@ -547,7 +486,6 @@ app.get('/api/census/address', async (req, res) => {
     }
     if (!u.searchParams.get('benchmark')) u.searchParams.set('benchmark', 'Public_AR_Current');
     u.searchParams.set('format', 'json');
-
     const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
     const body = await r.text();
     res.set('Content-Type', r.headers.get('content-type') || 'application/json; charset=utf-8');
@@ -558,14 +496,31 @@ app.get('/api/census/address', async (req, res) => {
   }
 });
 
-// --- OpenCage proxy (requires OPENCAGE_KEY in .env) ---
+// OpenCage proxy (requires OPENCAGE_KEY)
+const ocCache = new Map(); // key => { t, body, status, contentType }
+const OC_TTL_MS = 5 * 60 * 1000;
+const OC_MAX_ENTRIES = 300;
+const ocGet = (key) => {
+  const row = ocCache.get(key);
+  if (!row) return null;
+  if (Date.now() - row.t > OC_TTL_MS) { ocCache.delete(key); return null; }
+  return row;
+};
+const ocSet = (key, val) => {
+  if (ocCache.size >= OC_MAX_ENTRIES) {
+    let oldestKey, oldestT = Infinity;
+    for (const [k, v] of ocCache) if (v.t < oldestT) { oldestT = v.t; oldestKey = k; }
+    if (oldestKey) ocCache.delete(oldestKey);
+  }
+  ocCache.set(key, { t: Date.now(), ...val });
+};
+
 app.get('/api/opencage', async (req, res) => {
   try {
     const key = process.env.OPENCAGE_KEY?.trim();
     if (!key) return res.status(500).json({ error: 'Missing OPENCAGE_KEY' });
 
-    // Sanitize/Clamp inputs
-    const q = String(req.query.q || '').slice(0, 200); // prevent abuse
+    const q = String(req.query.q || '').slice(0, 200);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 5, 1), 10);
     const language = req.query.language ? String(req.query.language) : undefined;
     const no_annotations = req.query.no_annotations ? String(req.query.no_annotations) : undefined;
@@ -593,46 +548,56 @@ app.get('/api/opencage', async (req, res) => {
     const contentType = r.headers.get('content-type') || 'application/json; charset=utf-8';
 
     ocSet(cacheKey, { body, status: r.status, contentType });
-
     res.set('Content-Type', contentType);
-    return res.status(r.status).send(body);
+    res.status(r.status).send(body);
   } catch (e) {
-    return res.status(502).json({ error: 'OpenCage proxy failed', detail: String(e?.message || e) });
+    res.status(502).json({ error: 'OpenCage proxy failed', detail: String(e?.message || e) });
   }
 });
 
+// what3words proxy (requires W3W_API_KEY)
+app.get('/api/3wa', async (req, res) => {
+  try {
+    const { lat, lon } = req.query;
+    const key = process.env.W3W_API_KEY?.trim();
+    if (!lat || !lon) return res.status(400).json({ error: 'Missing lat/lon' });
+    if (!key) return res.status(500).json({ error: 'Missing W3W_API_KEY' });
 
-// --- Upload errors & generic error handler ---
+    const url = new URL('https://api.what3words.com/v3/convert-to-3wa');
+    url.searchParams.set('coordinates', `${lat},${lon}`);
+    url.searchParams.set('key', key);
+    url.searchParams.set('language', 'en');
 
-// in src/server.js (anywhere above the 404 handler)
-app.get('/api/config', (_req, res) => {
-  res.json({
-    opencageEnabled: Boolean(process.env.OPENCAGE_KEY),
-    // don't send the NASA key value unless you want it public
-  });
+    const r = await fetch(url);
+    const body = await r.json().catch(() => ({}));
+    if (r.ok && body?.words) return res.status(200).json({ words: body.words });
+    res.status(r.status).json(body);
+  } catch {
+    res.status(500).json({ error: 'server error' });
+  }
 });
 
-
-// --- 404 logger ---
+// ──────────────────────────────────────────────────────────────────────────────
+/** Errors & 404 */
+// ──────────────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
-  console.warn('404 for path:', req.method, req.originalUrl);
+  console.warn('404:', req.method, req.originalUrl);
   res.status(404).send('Not found');
 });
 
-// (Keeps Multer errors clean; prevents stack traces from leaking)
 app.use((err, _req, res, _next) => {
   if (err instanceof multer.MulterError) {
     return res.status(400).json({ error: err.message });
   }
   if (typeof err?.message === 'string' &&
-     (err.message.includes('Unsupported file extension') || err.message.includes('Only image'))) {
+      (err.message.includes('Unsupported file extension') || err.message.includes('Only image'))) {
     return res.status(400).json({ error: err.message });
   }
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// --- Start server ---
+// ──────────────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+  console.log(`API listening on http://localhost:${port}`);
 });

@@ -4,10 +4,14 @@
   "description": "",
   "main": "index.js",
   "type": "module",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev:server": "nodemon src/server.js",
+    "dev:vite": "vite",
+    "build": "vite build",
+    "start": "node src/server.js"
   },
   "keywords": [],
   "author": "",
@@ -22,11 +26,15 @@
     "express-slow-down": "^3.0.0",
     "file-type": "^21.0.0",
     "helmet": "^8.1.0",
+    "leaflet": "^1.9.4",
+    "leaflet-control-geocoder": "^3.3.1",
+    "leaflet-sidebar-v2": "^3.2.3",
     "multer": "^2.0.2",
     "sharp": "^0.34.4",
     "zod": "^4.1.9"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "vite": "^7.1.6"
   }
 }

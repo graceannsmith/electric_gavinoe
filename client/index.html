@@ -1,4 +1,4 @@
-<!-- public/index.html -->
+<!-- client/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,14 +15,13 @@
   <link rel="dns-prefetch" href="//photon.komoot.io">
 
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-sidebar-v2@3.1.0/css/leaflet-sidebar.min.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@3.3.0/dist/Control.Geocoder.css" />
+ 
   <!-- Your CSS (versioned) -->
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
-  <link rel="stylesheet" href="style.css?v=2025-09-10a" />
+  
 
   <title>Electric Gavinoe</title>
 </head>
@@ -56,10 +55,8 @@
    </div>
 
   <!-- Scripts: CDNs first, then your app -->
-  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script defer src="https://unpkg.com/leaflet-sidebar-v2@3.1.0/js/leaflet-sidebar.min.js"></script>
-  <script defer src="https://unpkg.com/leaflet-control-geocoder@3.3.0/dist/Control.Geocoder.js"></script>
-  <script defer src="main.js?v=2025-09-13a"></script>
+ 
+  <script type="module" src="/src/main.js"></script>
 
 </body>
 </html>
