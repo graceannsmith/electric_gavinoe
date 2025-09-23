@@ -104,7 +104,7 @@ app.use(
     '/api/census/oneline',
     '/api/census/address',
     '/api/opencage',
-    '/api/3wa'
+    '/api/3wa', '/api/nasa/apod', '/api/nasa/epic'
   ],
   apiLimiter
 );
@@ -147,15 +147,15 @@ const TIPS_FILE    = path.join(DATA_DIR, 'tips.json');
 ensureFile(MARKERS_FILE, JSON.stringify([]));
 ensureFile(TIPS_FILE, JSON.stringify({}));
 
-function readMarkers() {
-  return JSON.parse(fs.readFileSync(MARKERS_FILE, 'utf8'));
+function readMarkers() { 
+  return readJSONSafe(MARKERS_FILE, []);
 }
 function writeMarkers(arr) {
   fs.writeFileSync(MARKERS_FILE, JSON.stringify(arr, null, 2), 'utf8');
 }
 
 function readTips() {
-  return JSON.parse(fs.readFileSync(TIPS_FILE, 'utf8'));
+  return readJSONSafe(TIPS_FILE, {});
 }
 function writeTips(data) {
   fs.writeFileSync(TIPS_FILE, JSON.stringify(data, null, 2), 'utf8');
@@ -189,10 +189,11 @@ const upload = multer({
 // ──────────────────────────────────────────────────────────────────────────────
 /** Config endpoint (lets client know which optional keys exist) */
 // ──────────────────────────────────────────────────────────────────────────────
+// src/server.js
 app.get('/api/config', (_req, res) => {
   res.json({
     opencageEnabled: Boolean(process.env.OPENCAGE_KEY),
-    nasaKey: process.env.NASA_API_KEY || ''   // dev convenience; omit in prod if you prefer
+    hasNasa: Boolean(process.env.NASA_API_KEY)
   });
 });
 
@@ -230,6 +231,18 @@ app.delete('/api/markers', (req, res) => {
   writeMarkers(list);
   res.status(204).end();
 });
+
+function readJSONSafe(file, fallback) {
+  try {
+    const txt = fs.readFileSync(file, 'utf8');
+    return JSON.parse(txt);
+  } catch (e) {
+    console.warn('[data] recovering from bad JSON in', path.basename(file), e.message);
+    try { fs.writeFileSync(file, JSON.stringify(fallback, null, 2), 'utf8'); } catch {}
+    return fallback;
+  }
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 /** Tips API (Perceptacle) */
@@ -576,6 +589,41 @@ app.get('/api/3wa', async (req, res) => {
     res.status(500).json({ error: 'server error' });
   }
 });
+
+// src/server.js — NASA proxies
+app.get('/api/nasa/apod', async (_req, res) => {
+  try {
+    const key = process.env.NASA_API_KEY?.trim();
+    if (!key) return res.status(500).json({ error: 'Missing NASA_API_KEY' });
+    const r = await fetch(`https://api.nasa.gov/planetary/apod?api_key=${key}&thumbs=true`);
+    const j = await r.json().catch(() => ({}));
+    return res.status(r.status).json(j);
+  } catch (e) {
+    return res.status(502).json({ error: 'NASA APOD proxy failed', detail: String(e?.message || e) });
+  }
+});
+
+app.get('/api/nasa/epic', async (_req, res) => {
+  try {
+    const key = process.env.NASA_API_KEY?.trim();
+    if (!key) return res.status(500).json({ error: 'Missing NASA_API_KEY' });
+    const r = await fetch(`https://api.nasa.gov/EPIC/api/natural/images?api_key=${key}`);
+    const j = await r.json().catch(() => ([]));
+    return res.status(r.status).json(j);
+  } catch (e) {
+    return res.status(502).json({ error: 'NASA EPIC proxy failed', detail: String(e?.message || e) });
+  }
+});
+
+
+// --- SPA fallback for client-side routing (must come before the 404) ---
+if (fs.existsSync(distDir)) {
+  app.get(/^\/(?!api|uploads|health|assets|favicon\.ico).*/, (req, res) => {
+    // Anything that's not an API/static path falls back to the app shell
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 /** Errors & 404 */

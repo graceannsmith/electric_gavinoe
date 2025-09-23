@@ -9,13 +9,20 @@ import 'leaflet-control-geocoder';
 import 'leaflet-control-geocoder/dist/Control.Geocoder.css';
 import '../style.css';
 import '../fonts.css';
+// client/src/main.js  (top of file)
 window.APP_CONFIG = { OPENCAGE_ENABLED: false, NASA_API_KEY: '' };
-fetch('/api/config').then(r => r.json()).then(c => {
-  if (c?.opencageEnabled) window.APP_CONFIG.OPENCAGE_ENABLED = true;
-  if (c?.nasaKey) window.APP_CONFIG.NASA_API_KEY = c.nasaKey;
-}).catch(() => {});
 
-console.log('EG main.js v2025-09-13a');
+fetch('/api/config')
+  .then(r => r.json())
+  .then(c => {
+    window.APP_CONFIG.OPENCAGE_ENABLED = !!c?.opencageEnabled;
+    window.APP_CONFIG.NASA_API_KEY     = c?.nasaKey || '';
+    injectNasaCard();            // ← move it here
+  })
+  .catch(() => {
+    // still try; injectNasaCard() will no-op if no key
+    injectNasaCard();
+  });
 
 const map = L.map('map', { preferCanvas:true, zoomAnimation:true, markerZoomAnimation:false })
   .setView([36.0840, -94.1739], 9.5);
@@ -372,8 +379,99 @@ const geocoderControl = L.Control.geocoder({
 })();
 
 // Sidebar
-const sidebar = L.control.sidebar({ container: 'sidebar', position: 'left', closeButton: true, autopan: false }).addTo(map);
-sidebar.open('details');
+
+// --- Sidebar + mobile toggle (drop-in block) ---
+// --- Sidebar + mobile toggle (final) ---
+const sidebar = L.control.sidebar({
+  container: 'sidebar',
+  position: 'left',
+  closeButton: true,
+  autopan: false
+}).addTo(map);
+
+const isSmallScreen = () => window.matchMedia('(max-width: 720px)').matches;
+
+// Set initial open/closed state (desktop open, mobile closed)
+// If something else opens it later, we'll detect and sync the button text below.
+// Right: mobile starts closed, desktop starts open
+if (isSmallScreen()) { sidebar.close(); } else { sidebar.open('details'); }
+
+
+// === Small-screen open/close helpers ===
+const header = document.querySelector('#details .leaflet-sidebar-header');
+header?.addEventListener('click', (e) => {
+  if (!isSmallScreen()) return;
+  if (e.target.closest('.leaflet-sidebar-close')) return; // ignore the chevron
+  if (document.getElementById('sidebar')?.classList.contains('peek')) expandPanel();
+});
+
+function minimizePanel(){
+  // On phones, enter header-only "peek" mode
+  if (!isSmallScreen()) return;
+  const root = document.getElementById('sidebar');
+  try { sidebar.open('details'); } catch {}
+  root?.classList.remove('collapsed');
+  root?.classList.add('peek');
+  document.body.classList.remove('panel-open');
+  setTimeout(() => map.invalidateSize({ animate:false }), 60);
+}
+
+function expandPanel(){
+  const root = document.getElementById('sidebar');
+  try { sidebar.open('details'); } catch {}
+  root?.classList.remove('collapsed');
+  root?.classList.remove('peek');   // ← leave peek
+  document.body.classList.add('panel-open');
+  setTimeout(() => map.invalidateSize({ animate:false }), 60);
+}
+
+
+// Floating mobile toggle (Open Panel / Open Map)
+(function makeMobileToggle(){
+  if (document.getElementById('mobile-toggle')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'mobile-toggle';
+  btn.className = 'mobile-toggle';
+  btn.type = 'button';
+  btn.setAttribute('aria-label', 'Toggle sidebar');
+  document.body.appendChild(btn);
+
+  const root = document.getElementById('sidebar');
+
+  // BODY visible only when not collapsed and not in peek
+  const isBodyVisible = () => !root.classList.contains('collapsed') && !root.classList.contains('peek');
+
+  function setLabel(){
+    btn.textContent = isBodyVisible() ? '🗺️ Display map' : '🔎 Open panel';
+    document.body.classList.toggle('panel-open', isBodyVisible());
+  }
+  setLabel();
+
+  btn.addEventListener('click', () => {
+    isBodyVisible() ? minimizePanel() : expandPanel();
+    setLabel();
+  });
+
+  sidebar.on('opening', setLabel);
+  sidebar.on('closing', setLabel);
+
+  const mq = window.matchMedia('(max-width: 720px)');
+  const onChange = () => {
+    if (mq.matches) { sidebar.open('details'); minimizePanel(); } // default to peek on phone
+    else { expandPanel(); }
+    setLabel();
+    setTimeout(() => map.invalidateSize({ animate:false }), 60);
+  };
+  (mq.addEventListener ? mq.addEventListener('change', onChange) : mq.addListener(onChange));
+})();
+
+
+// Call this whenever you render details (e.g., after clicking/creating a marker)
+// You already call showDetails(...) on clicks—just ensure it calls addBackToMapIfSmall().
+
+
+addBackToMapIfSmall();
 
 // === Draggable sidebar width ===
 (function addSidebarResizer(){
@@ -583,20 +681,58 @@ function renderApiList(rows) {
   list.innerHTML = rows.map(r => r.html).join('') || '<li>Nothing found.</li>';
 }
 
-// NASA APOD (daily) + EPIC fallback (robust)
+// NASA APOD (daily) + EPIC fallback via server proxies (no key in browser)
 async function injectNasaCard() {
+  const dayKey = new Date().toISOString().slice(0, 10);      // e.g. "2025-09-23" (UTC is fine for APOD)
+const STORAGE_KEY = `eg:nasa-card:${dayKey}`;
+
+// read cache
+try {
+  const cacheRaw = localStorage.getItem(STORAGE_KEY);
+  const cache = cacheRaw ? JSON.parse(cacheRaw) : null;
+  if (cache) {
+    // ...render cached HTML...
+    return;
+  }
+} catch {}
+
+// when saving cache (after show(...)):
+try {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ t: Date.now(), html: body.innerHTML }));
+} catch {}
+
+// (optional) clean yesterday’s old key once in a while:
+try { localStorage.removeItem('eg:nasa-card'); } catch {}
   const host = document.getElementById('pane-details-content') || document.body;
   if (!host || document.getElementById('nasa-card')) return;
 
-  const key = (window.APP_CONFIG?.NASA_API_KEY || 'DEMO_KEY');
+  // Try 24h cache first
+  try {
+    const cacheRaw = localStorage.getItem('eg:nasa-card');
+    const cache = cacheRaw ? JSON.parse(cacheRaw) : null;
+    const fresh = cache && (Date.now() - cache.t < 24 * 60 * 60 * 1000);
+    if (fresh) {
+      const wrap = document.createElement('div');
+      wrap.id = 'nasa-card';
+      wrap.style.cssText = 'margin:8px 0;padding:8px;border-radius:10px;background:#111;color:#eee';
+      wrap.innerHTML = `<div>🚀 <strong>Space image of the day</strong></div>
+        <div id="nasa-card-body">${cache.html}</div>`;
+      host.prepend(wrap);
+      return;
+    }
+  } catch {}
+
+  // Create the container
   const wrap = document.createElement('div');
   wrap.id = 'nasa-card';
   wrap.style.cssText = 'margin:8px 0;padding:8px;border-radius:10px;background:#111;color:#eee';
-  wrap.innerHTML = `<div>🚀 <strong>Space image of the day</strong></div><div id="nasa-card-body">Loading…</div>`;
+  wrap.innerHTML = `<div>🚀 <strong>Space image of the day</strong></div>
+                    <div id="nasa-card-body">Loading…</div>`;
   host.prepend(wrap);
 
   const show = (imgUrl, linkUrl, title, date, caption) => {
-    document.getElementById('nasa-card-body').innerHTML =
+    const body = document.getElementById('nasa-card-body');
+    body.innerHTML =
       `<div style="display:flex;gap:8px;align-items:flex-start;">
          <img src="${imgUrl}" alt="" style="max-width:120px;border-radius:8px" loading="lazy">
          <div>
@@ -604,30 +740,63 @@ async function injectNasaCard() {
            <small>${escapeHTML(date || '')}${caption ? ' — ' + escapeHTML(caption) : ''}</small>
          </div>
        </div>`;
+    // cache rendered HTML for 24h
+    try {
+      localStorage.setItem('eg:nasa-card', JSON.stringify({ t: Date.now(), html: body.innerHTML }));
+    } catch {}
   };
 
+  // 1) APOD via your proxy
   try {
-    const r = await fetch(`https://api.nasa.gov/planetary/apod?api_key=${key}&thumbs=true`);
+    const r = await fetch('/api/nasa/apod', { headers: { 'Accept': 'application/json' } });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || j.error || (!j.url && !j.thumbnail_url)) throw new Error('APOD unavailable');
-    const img = j.media_type === 'video' ? j.thumbnail_url : j.url;
-    show(img, j.hdurl || j.url || img, j.title || 'APOD', j.date || '', '');
-    return;
-  } catch {}
 
+    const img = j.media_type === 'video' ? j.thumbnail_url : j.url;
+    const link = j.hdurl || j.url || img;
+    show(img, link, j.title || 'APOD', j.date || '', '');
+    return;
+  } catch (_) {
+    // fall through to EPIC
+  }
+
+  // 2) EPIC fallback via your proxy
   try {
-    const r2 = await fetch(`https://api.nasa.gov/EPIC/api/natural/images?api_key=${key}`);
-    const frames = await r2.json();
-    if (!Array.isArray(frames) || !frames.length) throw new Error('EPIC empty');
+    const r2 = await fetch('/api/nasa/epic', { headers: { 'Accept': 'application/json' } });
+    const frames = await r2.json().catch(() => []);
+    if (!r2.ok || !Array.isArray(frames) || !frames.length) throw new Error('EPIC empty');
+
     const f = frames[0];
     const dt = new Date(f.date);
-    const yyyy = dt.getUTCFullYear(), mm = String(dt.getUTCMonth()+1).padStart(2,'0'), dd = String(dt.getUTCDate()).padStart(2,'0');
+    const yyyy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
     const url = `https://epic.gsfc.nasa.gov/archive/natural/${yyyy}/${mm}/${dd}/png/${f.image}.png`;
     show(url, url, `DSCOVR/EPIC – ${f.caption || 'Earth'}`, f.date, f.caption || '');
   } catch {
-    document.getElementById('nasa-card-body').textContent = 'NASA image unavailable (rate limit or network).';
+    const body = document.getElementById('nasa-card-body');
+    if (body) body.textContent = 'NASA image unavailable (proxy not configured, rate limit, or network).';
   }
 }
+
+function addBackToMapIfSmall() {
+  if (!window.matchMedia('(max-width: 720px)').matches) return;
+
+  const pane = document.getElementById('pane-details-content');
+  if (pane && !pane.querySelector('#btn-show-map')) {
+    const introBtn = document.createElement('button');
+    introBtn.id = 'btn-show-map';
+    introBtn.className = 'panel-minimize sm-only';
+    introBtn.type = 'button';
+    introBtn.textContent = 'Display Map';
+    introBtn.addEventListener('click', minimizePanel);
+
+    const lastH2 = pane.querySelector('h2:last-of-type');
+    if (lastH2?.nextSibling) pane.insertBefore(introBtn, lastH2.nextSibling);
+    else pane.appendChild(introBtn);
+  }
+}
+
 
 /* ============================
    Details pane + Perceptacle
@@ -647,6 +816,7 @@ function showDetails(html, coords) {
       ${activeType === 'usgs'
         ? `<span class="readonly-pill">USGS marker · read-only</span>`
         : `<span class="readonly-pill">Custom marker</span>`}
+        <button class="panel-minimize sm-only" id="btn-return-map">Return to Map</button>
     </div>
     ${activeType === 'custom' ? `
       <div class="hover-controls">
@@ -692,6 +862,10 @@ function showDetails(html, coords) {
 
   <ul id="tip-inline-list"></ul>
 `;
+document.getElementById('btn-return-map')?.addEventListener('click', minimizePanel);
+addBackToMapIfSmall();
+expandPanel();           
+sidebar.open('details'); // keep this, so the panel opens after selecting a marker
 
   const [lat, lon] = (pane.dataset.coords || '').split(',').map(Number);
   const listEl = () => document.getElementById('api-result-list');
@@ -1124,12 +1298,15 @@ async function loadCustomMarkers() {
   let markers = [];
   try {
     const r = await fetch('/api/markers', { headers: { 'Accept': 'application/json' } });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    markers = await r.json();
-    if (!Array.isArray(markers)) markers = [];
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status} – ${body.slice(0, 200)}`);
+    }
+    const data = await r.json();
+    markers = Array.isArray(data) ? data : [];
   } catch (e) {
     console.warn('markers fetch failed', e);
-    return; // bail quietly if API is down
+    return;
   }
 
   markers.forEach((m, i) => {
@@ -1237,7 +1414,6 @@ L.control.layers(
 // 12) Initial load
 loadUSGSGages();
 loadCustomMarkers();
-injectNasaCard();
 
 // -----------------
 // Optional: ad-hoc tester in console
