@@ -161,11 +161,6 @@ Install helper:
 ###import markerIcon from 'leaflet/dist/images/marker-icon.png';
 ###import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
-###L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow
-});
 
 **_L is not defined***_Ensure you import Leaflet via ESM (import L from 'leaflet') and the bundle is loading (no CDN race in Vite).
 **_Cannot find module './helpers/merge-exports' (iconv-lite)***_Use Node 20.x LTS. If you’re on Node 22+, switch and reinstall deps:###nvm use 20

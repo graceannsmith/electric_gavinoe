@@ -43,9 +43,9 @@ html, body {
 a { color: #0b6bcb; text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* Inline SVG inside custom markers */
+/* Inline SVG inside custom & USGS markers */
 .mk__svg { width: 18px; height: 18px; display: block; }
-
+.mk--usgs { border-color: #2b7de9; }
 
 /* ---------------- Map & control stacking ---------------- */
 #map { width: 100%; height: 100vh; }

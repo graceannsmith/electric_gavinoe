@@ -649,6 +649,23 @@ function makeCategoryIcon(cat){
   });
 }
 
+// Inline SVG USGS droplet icon (asset-free)
+const USGS_ICON = L.divIcon({
+  className: 'mk-wrap',
+  html: `
+    <div class="mk mk--usgs" role="img" aria-label="USGS gauge">
+      <svg class="mk__svg" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#2b7de9"
+          d="M12 2c-3.6 4.1-5.2 7.4-5.2 10.2a5.2 5.2 0 1 0 10.4 0C17.2 9.4 15.6 6.1 12 2z"/>
+      </svg>
+    </div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+  popupAnchor: [0, -28]
+});
+
+
 // 6) what3words helper
 async function fetch3wa(lat, lon) {
   const res = await fetch(`/api/3wa?lat=${lat}&lon=${lon}`);
@@ -1296,13 +1313,16 @@ async function loadUSGSGages() {
         <p><em>as of ${new Date(last.dateTime).toLocaleString()}</em></p>
       `;
 
-      L.marker([lat, lon]).addTo(markerLayer).on('click', (e) => {
-        L.DomEvent.stopPropagation(e);
-        activeType = 'usgs';
-        activeId = id;
-        currentMarkerData = { type: 'usgs', id, title: site.station_nm, lat, lon };
-        showDetails(infoHtml, [lat, lon]);
-      });
+      L.marker([lat, lon], { icon: USGS_ICON, title: site.station_nm })
+  .addTo(markerLayer)
+  .on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    activeType = 'usgs';
+    activeId = id;
+    currentMarkerData = { type: 'usgs', id, title: site.station_nm, lat, lon };
+    showDetails(infoHtml, [lat, lon]);
+  });
+
     });
   } catch (err) {
     if (err?.name !== 'AbortError') {
