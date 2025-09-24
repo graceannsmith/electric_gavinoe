@@ -611,18 +611,38 @@ const CATEGORY_META = {
   history: { label: 'History', glyph: '🏛', class: 'mk--history' },
   misc:    { label: 'Misc',    glyph: '📍', class: 'mk--misc'    }
 };
+
+// Inline SVGs so markers render the same on all platforms
+const SVG_ICONS = {
+  plant: `
+    <svg viewBox="0 0 24 24" class="mk__svg" aria-hidden="true">
+      <path fill="#2e7d32" d="M12 2c-3.5 2.5-5 5.5-5 9 0 3.9 2.6 7 5 9 2.4-2 5-5.1 5-9 0-3.5-1.5-6.5-5-9z"/>
+    </svg>`,
+  history: `
+    <svg viewBox="0 0 24 24" class="mk__svg" aria-hidden="true">
+      <path fill="#6d4c41" d="M12 2 4 6h16L12 2zm-7 8h14v2H5v-2zm2 4h10v6H7v-6z"/>
+    </svg>`,
+  misc: `
+    <svg viewBox="0 0 24 24" class="mk__svg" aria-hidden="true">
+      <path fill="#d219b0" d="M12 2a7 7 0 0 1 7 7c0 5-7 13-7 13S5 14 5 9a7 7 0 0 1 7-7zm0 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+    </svg>`
+};
+
 function normalizeCategory(raw){
   const k = String(raw||'').trim().toLowerCase();
   return (k in CATEGORY_META) ? k : (['plant','history','misc'].includes(k) ? k : 'misc');
 }
-function categoryLabel(cat){ return (CATEGORY_META[cat]?.label) || 'Misc'; }
-function categoryGlyph(cat){ return (CATEGORY_META[cat]?.glyph) || '📍'; }
+function categoryLabel(cat){ return CATEGORY_META[cat]?.label || 'Misc'; }
+function categoryGlyph(cat){ return CATEGORY_META[cat]?.glyph || '📍'; }
+
 function makeCategoryIcon(cat){
-  const key = normalizeCategory(cat);
+  const key  = normalizeCategory(cat);
   const meta = CATEGORY_META[key] || CATEGORY_META.misc;
+  const svg  = SVG_ICONS[key]     || SVG_ICONS.misc;
+
   return L.divIcon({
     className: 'mk-wrap',
-    html: `<div class="mk ${meta.class}"><span class="mk__glyph">${meta.glyph}</span></div>`,
+    html: `<div class="mk ${meta.class}" role="img" aria-label="${meta.label}">${svg}</div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 28],
     popupAnchor: [0, -28]
