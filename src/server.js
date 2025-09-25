@@ -10,23 +10,67 @@ import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 
-// Node ESM __dirname shim
+// ──────────────────────────────────────────────────────────────────────────────
+// __dirname shim (ESM)
+// ──────────────────────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 // ──────────────────────────────────────────────────────────────────────────────
-// App setup
+// App
 // ──────────────────────────────────────────────────────────────────────────────
 const app  = express();
 const port = process.env.PORT || 3000;
 
-// If behind a proxy (Railway/Render/Heroku), trust it so rate limits/IPs work
+// Trust proxy (Render/Heroku/etc.)
 app.set('trust proxy', 1);
-
-// Hide "X-Powered-By"
 app.disable('x-powered-by');
 
-// Security headers (CSP tuned for your current client)
+// ──────────────────────────────────────────────────────────────────────────────
+// Persistence root (ENV: DISK_ROOT). Falls back to a local folder if unwritable.
+// On Render you’ll set DISK_ROOT=/var/egdata and mount a Disk there.
+// ──────────────────────────────────────────────────────────────────────────────
+function pickPersistRoot() {
+  const tryDir = (p) => {
+    try {
+      fs.mkdirSync(p, { recursive: true });
+      fs.accessSync(p, fs.constants.W_OK);
+      return p;
+    } catch {
+      return null;
+    }
+  };
+
+  const fromEnv = (process.env.DISK_ROOT || '').trim();
+  if (fromEnv) {
+    const ok = tryDir(path.resolve(fromEnv));
+    if (ok) return ok;
+    console.warn(`[persist] DISK_ROOT set to "${fromEnv}" but not writable; falling back.`);
+  }
+
+  // local fallback inside repo (not persistent on ephemeral hosts)
+  const local = path.resolve(__dirname, '../var-data');
+  const ok = tryDir(local);
+  if (ok) return ok;
+
+  // ultimate fallback: process cwd
+  const cwd = tryDir(path.resolve(process.cwd(), 'var-data')) || process.cwd();
+  return cwd;
+}
+
+const PERSIST_ROOT = pickPersistRoot();
+const DATA_DIR     = path.join(PERSIST_ROOT, 'data');
+const UPLOADS_DIR  = path.join(PERSIST_ROOT, 'uploads');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+console.log('[persist] Using PERSIST_ROOT:', PERSIST_ROOT);
+console.log('[persist] DATA_DIR:', DATA_DIR);
+console.log('[persist] UPLOADS_DIR:', UPLOADS_DIR);
+
+// ──────────────────────────────────────────────────────────────────────────────
+/** Security headers (CSP tuned for your client) */
+// ──────────────────────────────────────────────────────────────────────────────
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -70,7 +114,7 @@ app.use(
 
 // Compression + JSON body parsing
 app.use(compression());
-app.use(express.json({ limit: '200kb' })); // your payloads are tiny JSON
+app.use(express.json({ limit: '200kb' }));
 
 // ──────────────────────────────────────────────────────────────────────────────
 /** Rate limits */
@@ -88,8 +132,6 @@ const uploadLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
-
-// Apply limits to API/proxy routes
 app.use(
   [
     '/api/tips',
@@ -112,8 +154,7 @@ app.use(
 // ──────────────────────────────────────────────────────────────────────────────
 /** Static assets (uploads + built client) */
 // ──────────────────────────────────────────────────────────────────────────────
-const PUBLIC_UPLOADS_DIR = path.join(__dirname, '../public/uploads'); // serves /uploads/**
-app.use('/uploads', express.static(PUBLIC_UPLOADS_DIR, {
+app.use('/uploads', express.static(UPLOADS_DIR, {
   etag: true, immutable: true, maxAge: '30d'
 }));
 
@@ -129,42 +170,41 @@ if (fs.existsSync(distDir)) {
 }
 
 // Health check
-app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => res.json({ ok: true, persistRoot: PERSIST_ROOT }));
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** Small file stores for markers/tips */
+/** Tiny file store helpers */
 // ──────────────────────────────────────────────────────────────────────────────
 function ensureFile(filePath, initialContent) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, initialContent, 'utf8');
 }
+function readJSONSafe(file, fallback) {
+  try {
+    const txt = fs.readFileSync(file, 'utf8');
+    return JSON.parse(txt);
+  } catch (e) {
+    console.warn('[data] recovering from bad JSON in', path.basename(file), e.message);
+    try { fs.writeFileSync(file, JSON.stringify(fallback, null, 2), 'utf8'); } catch {}
+    return fallback;
+  }
+}
 
-const DATA_DIR = path.join(__dirname, '../data');
 const MARKERS_FILE = path.join(DATA_DIR, 'markers.json');
 const TIPS_FILE    = path.join(DATA_DIR, 'tips.json');
-
 ensureFile(MARKERS_FILE, JSON.stringify([]));
-ensureFile(TIPS_FILE, JSON.stringify({}));
+ensureFile(TIPS_FILE,    JSON.stringify({}));
 
-function readMarkers() { 
-  return readJSONSafe(MARKERS_FILE, []);
-}
-function writeMarkers(arr) {
-  fs.writeFileSync(MARKERS_FILE, JSON.stringify(arr, null, 2), 'utf8');
-}
-
-function readTips() {
-  return readJSONSafe(TIPS_FILE, {});
-}
-function writeTips(data) {
-  fs.writeFileSync(TIPS_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
+const readMarkers = () => readJSONSafe(MARKERS_FILE, []);
+const writeMarkers = (arr) => fs.writeFileSync(MARKERS_FILE, JSON.stringify(arr, null, 2), 'utf8');
+const readTips = () => readJSONSafe(TIPS_FILE, {});
+const writeTips = (obj) => fs.writeFileSync(TIPS_FILE, JSON.stringify(obj, null, 2), 'utf8');
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** Multer upload for tip photos */
+/** Multer uploads (tip photos) */
 // ──────────────────────────────────────────────────────────────────────────────
-const TIP_UPLOAD_DIR = path.join(PUBLIC_UPLOADS_DIR, 'tips');
+const TIP_UPLOAD_DIR = path.join(UPLOADS_DIR, 'tips');
 fs.mkdirSync(TIP_UPLOAD_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -187,9 +227,8 @@ const upload = multer({
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** Config endpoint (lets client know which optional keys exist) */
+/** Config to client */
 // ──────────────────────────────────────────────────────────────────────────────
-// src/server.js
 app.get('/api/config', (_req, res) => {
   res.json({
     opencageEnabled: Boolean(process.env.OPENCAGE_KEY),
@@ -198,7 +237,7 @@ app.get('/api/config', (_req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** Markers API (used by client/src/main.js) */
+/** Markers API */
 // ──────────────────────────────────────────────────────────────────────────────
 app.get('/api/markers', (_req, res) => res.json(readMarkers()));
 
@@ -231,18 +270,6 @@ app.delete('/api/markers', (req, res) => {
   writeMarkers(list);
   res.status(204).end();
 });
-
-function readJSONSafe(file, fallback) {
-  try {
-    const txt = fs.readFileSync(file, 'utf8');
-    return JSON.parse(txt);
-  } catch (e) {
-    console.warn('[data] recovering from bad JSON in', path.basename(file), e.message);
-    try { fs.writeFileSync(file, JSON.stringify(fallback, null, 2), 'utf8'); } catch {}
-    return fallback;
-  }
-}
-
 
 // ──────────────────────────────────────────────────────────────────────────────
 /** Tips API (Perceptacle) */
@@ -365,20 +392,19 @@ app.delete('/api/tips', (req, res) => {
   res.status(204).end();
 });
 
-// Photo upload for tips
+// Photo upload
 app.post('/api/tip-photos', uploadLimiter, upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   res.json({ url: `/uploads/tips/${req.file.filename}` });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** Proxies your client uses */
+/** Proxies used by the client */
 // ──────────────────────────────────────────────────────────────────────────────
 
-// Wikipedia Nearby (with simple cache)
+// Wikipedia Nearby (cached)
 const wikiCache = new Map();
 const WIKI_TTL_MS = 10 * 60 * 1000;
-
 async function wikipediaNearbyHandler(req, res) {
   try {
     const lat = Number(req.query.lat);
@@ -412,7 +438,7 @@ async function wikipediaNearbyHandler(req, res) {
     u.searchParams.set('pithumbsize', '320');
     u.searchParams.set('inprop', 'url');
 
-    const r = await fetch(u, { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
+    const r = await fetch(u, { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+server)' } });
     const j = await r.json();
 
     if (j?.error) return res.status(502).json({ error: 'Wikipedia error', detail: j.error.info || j.error.code });
@@ -464,7 +490,7 @@ app.get('/api/photon', async (req, res) => {
   try {
     const upstream = new URL('https://photon.komoot.io/api/');
     for (const [k, v] of Object.entries(req.query)) upstream.searchParams.set(k, String(v));
-    const r = await fetch(upstream.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
+    const r = await fetch(upstream.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+server)' } });
     const body = await r.text();
     res.set('Content-Type', r.headers.get('content-type') || 'application/json; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
@@ -481,7 +507,7 @@ app.get('/api/census/oneline', async (req, res) => {
     u.searchParams.set('address', String(req.query.address || ''));
     u.searchParams.set('benchmark', String(req.query.benchmark || 'Public_AR_Current'));
     u.searchParams.set('format', 'json');
-    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+server)' } });
     const body = await r.text();
     res.set('Content-Type', r.headers.get('content-type') || 'application/json; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
@@ -499,7 +525,7 @@ app.get('/api/census/address', async (req, res) => {
     }
     if (!u.searchParams.get('benchmark')) u.searchParams.set('benchmark', 'Public_AR_Current');
     u.searchParams.set('format', 'json');
-    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+server)' } });
     const body = await r.text();
     res.set('Content-Type', r.headers.get('content-type') || 'application/json; charset=utf-8');
     res.set('Cache-Control', 'public, max-age=300');
@@ -556,7 +582,7 @@ app.get('/api/opencage', async (req, res) => {
     if (countrycode) u.searchParams.set('countrycode', countrycode);
     if (proximity) u.searchParams.set('proximity', proximity);
 
-    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+local)' } });
+    const r = await fetch(u.toString(), { headers: { 'User-Agent': 'ElectricGavinoe/1.0 (+server)' } });
     const body = await r.text();
     const contentType = r.headers.get('content-type') || 'application/json; charset=utf-8';
 
@@ -590,7 +616,7 @@ app.get('/api/3wa', async (req, res) => {
   }
 });
 
-// src/server.js — NASA proxies
+// NASA proxies
 app.get('/api/nasa/apod', async (_req, res) => {
   try {
     const key = process.env.NASA_API_KEY?.trim();
@@ -615,18 +641,18 @@ app.get('/api/nasa/epic', async (_req, res) => {
   }
 });
 
-
-// --- SPA fallback for client-side routing (must come before the 404) ---
+// ──────────────────────────────────────────────────────────────────────────────
+// SPA fallback (must be before the 404)
+// ──────────────────────────────────────────────────────────────────────────────
 if (fs.existsSync(distDir)) {
-  app.get(/^\/(?!api|uploads|health|assets|favicon\.ico).*/, (req, res) => {
-    // Anything that's not an API/static path falls back to the app shell
+  app.get(/^\/(?!api|uploads|health|assets|favicon\.ico).*/, (_req, res) => {
     res.set('Cache-Control', 'no-store');
     res.sendFile(path.join(distDir, 'index.html'));
   });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-/** Errors & 404 */
+// Errors & 404
 // ──────────────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
   console.warn('404:', req.method, req.originalUrl);
