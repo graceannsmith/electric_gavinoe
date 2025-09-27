@@ -271,6 +271,27 @@ a:hover { text-decoration: underline; }
   outline: none;
   box-shadow: 0 0 0 3px rgba(75,58,47,.25);
 }
+/* --- Force readable colors for tip cards (prod-safe) --- */
+#pane-details-content ul#tip-inline-list li.tip-item {
+  color: #1d2939;                 /* main tip text */
+  background: #f6f6f6;
+}
+
+#pane-details-content ul#tip-inline-list li.tip-item .tip-text {
+  color: inherit;                 /* inherit the dark text */
+}
+
+#pane-details-content ul#tip-inline-list li.tip-item .timestamp {
+  color: #667085;                 /* muted timestamp */
+}
+
+/* If drafts look too light in prod, keep them readable: */
+#pane-details-content ul#tip-inline-list li.tip-item.draft {
+  color: #1d2939;
+  background: rgba(255,255,255,.9);
+  border: 1px dashed rgba(0,0,0,.2);
+}
+
 #tip-inline-text::placeholder { font-family: "Buda", serif; opacity: .7; }
 
 /* Small-screen only utility */
