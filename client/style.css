@@ -334,7 +334,7 @@ a:hover { text-decoration: underline; }
 
 /* Tip list */
 .tip-text { white-space: pre-wrap; margin-bottom: 4px; }
-.tip-item .tip-photo { display:block; margin-top: 4px; max-width:100%; height:auto; }
+.tip-item .tip-photo { display:block; margin-top: 4px; max-width:100%; height:auto; color: var(--bark-700);}
 
 ul#tip-inline-list{
   list-style: none;
